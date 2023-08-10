@@ -1,201 +1,125 @@
-use std::ops::{Add, Mul};
-use std::fmt;
 use minifb::{Key, Window, WindowOptions};
-use std::thread;
-use thread::JoinHandle;
-use std::time::Duration;
+use std::{error::Error, thread};
 
-const WIDTH: usize = 1000;
-const HEIGHT: usize = 1000;
+mod complex;
+mod pixel;
+mod unchecked_array;
+
+use complex::Complex;
+use pixel::RGB;
+use unchecked_array::UncheckedSyncArray;
+
 const ITER_MAX: i32 = 600;
 
-#[derive(Clone, Copy)]
-struct Complex {
-    r: f64,
-    i: f64,
-}
+fn index_to_complex(i: usize, scale: f64, dim: WindowDimensions) -> Complex {
+    const OFFSET: Complex = Complex {
+        r: -1.78105004,
+        i: 0.0,
+    };
 
-impl Complex {
+    let x: isize = (i % dim.width) as isize - (dim.width / 2) as isize;
+    let y: isize = (i / dim.height) as isize - (dim.height / 2) as isize;
 
-    const OFFSET: Complex =  Complex{r: -1.78105004, i: 0.0};
-
-    fn magnitude(&self) -> f64 {
-        self.r.hypot(self.i)
-    }
-}
-
-impl Add for Complex {  
-    type Output = Self;
-    fn add(self, other: Self) -> Self {
-
-        let real: f64 = self.r + other.r;
-        let imaginary: f64 = self.i + other.i;
-
-        Self{r: real, i: imaginary}
-    }
-}
-
-impl Mul for Complex {  
-    type Output = Self;
-    fn mul(self, other: Self) -> Self {
-
-        let real: f64 = (self.r * other.r)-(self.i * other.i);
-        let imaginary: f64 = (self.r * other.i)+(self.i * other.r);
-
-        Self{r: real, i: imaginary}
-    }
-}
-
-impl fmt::Display for Complex {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.i >= 0.0 {
-            write!(f, "{0}+{1}i", self.r, self.i)
-        } else {
-            write!(f, "{0}{1}i", self.r, self.i)
-        }
-    }
-}
-
-fn index_to_complex (i: usize, scale: f64) -> Complex {
-    let x: isize = (i%WIDTH)as isize - (WIDTH/2) as isize;
-    let y: isize = (i/HEIGHT) as isize - (HEIGHT/2) as isize;
-    
     let r = x as f64 * scale;
     let i = y as f64 * scale;
-    Complex{i, r} + Complex::OFFSET
+    Complex { i, r } + OFFSET
 }
 
-struct RGB {
-    r: u8,
-    g: u8,
-    b: u8,
-}
+fn generate_buffer(threads: usize, scale: f64, buffer: &mut [u32], dim: WindowDimensions) {
+    let max_pixel = dim.width * dim.height - 1;
 
-fn hsv_to_rgb(h : f32, s : f32, v : f32) -> RGB
-{
-    let r : f32;
-    let g : f32;
-    let b : f32;
+    let buf = UncheckedSyncArray::from_slice(buffer);
+    let out_buf = &buf;
 
-    if s == 0.0
-    {
-        r = v;
-        g = v;
-        b = v;
-    }
-    else
-    {
-        let mut h = h * 6.0;
-        if h == 6.0
-        {
-            h = 0.0;
+    rayon::scope(|s| {
+        for thread_id in 0..threads {
+            s.spawn(move |_| {
+                let mut pixel = thread_id as usize;
+
+                while pixel <= max_pixel {
+                    let mut z = Complex { r: 0.0, i: 0.0 };
+                    let c = index_to_complex(pixel, scale, dim);
+                    let mut iter: i32 = 0;
+
+                    while z.magnitude() <= 2.0 && iter < ITER_MAX {
+                        iter += 1;
+                        z = (z * z) + c;
+                    }
+
+                    let hsv = if z.magnitude() < 2.0 {
+                        0
+                    } else {
+                        let color = RGB::from_hsv(((iter as f32) / 70.0) % 1.0, 0.5, 1.0);
+
+                        color.to_u32()
+                    };
+
+                    // SAFETY: the pixels given to each thread are unique, and cannot overlap
+                    unsafe { out_buf.store_unchecked(pixel, hsv) };
+
+                    pixel += threads;
+                }
+            });
         }
-        let i = h as i32;
-        let f = h - i as f32;
-        let p = v * (1.0 - s);
-        let q = v * (1.0 - s * f);
-        let t = v * (1.0 - s * (1.0 - f));
-
-        match i
-        {
-            0 => { r = v; g = t; b = p; },
-            1 => { r = q; g = v; b = p; },
-            2 => { r = p; g = v; b = t; },
-            3 => { r = p; g = q; b = v; },
-            4 => { r = t; g = p; b = v; },
-            5 => { r = v; g = p; b = q; },
-            _ => { r = 0.0; g = 0.0; b = 0.0; },
-        }
-    }
-
-    RGB{r: (r*255.0).round() as u8, g: (g*255.0).round() as u8, b: (b*255.0).round() as u8}
+    });
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
+    let threads: usize = thread::available_parallelism()?.into();
+    let mut scale: f64 = 4.0 / 450.0;
+    let dimensions = WindowDimensions::default();
 
-    let threads = thread::available_parallelism().unwrap();
-    let mut scale: f64 = 4.0/450.0;
-    let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
+    let mut buffer: Vec<u32> = vec![0; dimensions.flat_length()];
 
     let mut window = Window::new(
         "Mandelbrot",
-        WIDTH,
-        HEIGHT,
+        dimensions.width,
+        dimensions.height,
         WindowOptions::default(),
-    )
-    .unwrap_or_else(|e| {
-        panic!("{}", e);
-    });
+    )?;
 
     window.limit_update_rate(Some(std::time::Duration::from_millis(33)));
 
-    let max_pixel = WIDTH*HEIGHT-1;
-
-    thread::sleep(Duration::from_millis(2000));
-
     while window.is_open() && !window.is_key_down(Key::Escape) {
+        generate_buffer(threads, scale, &mut buffer, dimensions);
 
-        let mut thread_handles: Vec<JoinHandle<Vec<(usize, u32)>>> = Vec::new();
+        scale = scale * 0.95;
 
-        for thread_id in 0..threads.into() {
-            let handle = thread::spawn(move|| {
-                let mut pixel = thread_id as usize;
-                let mut delta: Vec<(usize, u32)> = Vec::new();
-                loop {
-                    if pixel > max_pixel {
-                        break;
-                    }
-                    let mut z = Complex{r: 0.0, i: 0.0};
-                    let c = index_to_complex(pixel, scale);
-                    let mut iter: i32 = 0;
-                    while z.magnitude() <= 2.0 && iter < ITER_MAX {
-                        iter += 1;
-                        z = (z*z) + c;
-                    }
-                    if z.magnitude() < 2.0 {
-                        delta.push((pixel, 0));
-                    } else {
-                        let color: RGB = hsv_to_rgb(((iter as f32)/70.0)%1.0, 0.5, 1.0);
-                        delta.push((pixel, u32::from_be_bytes([0,color.r,color.g,color.b])));
-                        //delta.push((pixel, u32::from_be_bytes([0,255,255,255])));
-                    }
-                    pixel += usize::from(threads);
-                }
-                delta
-            });
-            thread_handles.push(handle);
-        }
-
-        for handle in thread_handles {
-            let result = handle.join().expect("Error!");
-            for (index, color) in result {
-                buffer[index] = color;
-            }
-        }
-        
-        scale = scale  * 0.95;
-/* 
-        SCALE = SCALE * 0.95;
-        for (index, pixel) in buffer.iter_mut().enumerate() {
-            let mut z = Complex{r: 0.0, i: 0.0};
-                let c = index_to_complex(index, SCALE);
-                let mut iter: i32 = 0;
-            while z.magnitude() <= 2.0 && iter < ITER_MAX {
-                iter += 1;
-                z = (z*z) + c;
-            }
-            if z.magnitude() < 2.0 {
-                *pixel = 0;
-            } else {
-                let color = ((iter as f32/ITER_MAX as f32 + 1.0).log(1.3) * 255.0).round() as u8;
-                *pixel = u32::from_be_bytes([0,color,color,color]);
-            }
-        }
-*/
-        // We unwrap here as we want this code to exit if it fails. Real applications may want to handle this in a different way
-        window
-            .update_with_buffer(&buffer, WIDTH, HEIGHT)
-            .unwrap();
+        window.update_with_buffer(&buffer, dimensions.width, dimensions.height)?;
     }
 
+    Ok(())
+}
+
+#[derive(Copy, Clone)]
+struct WindowDimensions {
+    width: usize,
+    height: usize,
+}
+
+impl Default for WindowDimensions {
+    fn default() -> Self {
+        const WIDTH: usize = 1000;
+        const HEIGHT: usize = 1000;
+
+        Self {
+            width: WIDTH,
+            height: HEIGHT,
+        }
+    }
+}
+
+impl WindowDimensions {
+    fn flat_length(&self) -> usize {
+        self.width * self.height
+    }
+}
+
+#[test]
+fn ensure_threadsafe() {
+    let threads: usize = thread::available_parallelism().unwrap().into();
+    let mut scale: f64 = 4.0 / 450.0;
+    let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
+
+    generate_buffer(threads, scale, &mut buffer);
 }
