@@ -39,8 +39,6 @@ fn generate_buffer(
     dim: WindowDimensions,
     offset: Complex,
 ) {
-    let max_pixel = dim.width * dim.height - 1;
-
     let buf = UncheckedSyncArray::from_slice(buffer);
     let out_buf = &buf;
 
@@ -49,7 +47,7 @@ fn generate_buffer(
             s.spawn(move |_| {
                 let mut pixel = thread_id;
 
-                while pixel <= max_pixel {
+                while pixel < out_buf.len() {
                     let mut z = Complex::default();
                     let c = index_to_complex(pixel, scale, dim, offset);
 
@@ -122,6 +120,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut frame = 0;
     let mut scale = conf.starting_scale;
 
+    let start = std::time::Instant::now();
+
     while window.is_open() && !window.is_key_down(Key::Escape) {
         generate_buffer(conf.threads, scale, &mut buffer, conf.dims, conf.offset);
         insert_frame_counter(frame, &mut buffer, conf.dims);
@@ -130,6 +130,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         frame += 1;
 
         window.update_with_buffer(&buffer, conf.dims.width, conf.dims.height)?;
+
+        if frame % 100 == 0 {
+            println!("{frame} frames in {:?}", start.elapsed());
+        }
     }
 
     Ok(())

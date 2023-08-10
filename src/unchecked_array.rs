@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub struct UncheckedSyncArray<'a, T>(*mut T, usize, core::marker::PhantomData<&'a mut T>);
 
 unsafe impl<'a, T: Send + Sync> Sync for UncheckedSyncArray<'a, T> {}
@@ -5,6 +7,14 @@ unsafe impl<'a, T: Send + Sync> Sync for UncheckedSyncArray<'a, T> {}
 impl<'a, T> UncheckedSyncArray<'a, T> {
     pub fn from_slice(v: &'a mut [T]) -> Self {
         UncheckedSyncArray(v.as_mut_ptr(), v.len(), core::marker::PhantomData)
+    }
+
+    pub fn len(&self) -> usize {
+        self.1
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// # Safety:
