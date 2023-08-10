@@ -137,7 +137,7 @@ fn main() {
 
         let mut thread_handles: Vec<JoinHandle<Vec<(usize, u32)>>> = Vec::new();
 
-        for thread_id in 0..threads {
+        for thread_id in 0..threads.into() {
             let handle = thread::spawn(move|| {
                 let mut pixel = thread_id as usize;
                 let mut delta: Vec<(usize, u32)> = Vec::new();
@@ -159,7 +159,7 @@ fn main() {
                         delta.push((pixel, u32::from_be_bytes([0,color.r,color.g,color.b])));
                         //delta.push((pixel, u32::from_be_bytes([0,255,255,255])));
                     }
-                    pixel += threads as usize;
+                    pixel += usize::from(threads);
                 }
                 delta
             });
