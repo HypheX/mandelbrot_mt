@@ -20,12 +20,7 @@ use unchecked_array::UncheckedSyncArray;
 const ITER_MAX: u16 = 600;
 
 #[inline]
-fn index_to_complex(i: usize, scale: f64, dim: WindowDimensions) -> Complex {
-    const OFFSET: Complex = Complex {
-        r: -1.781_050_04,
-        i: 0.0,
-    };
-
+fn index_to_complex(i: usize, scale: f64, dim: WindowDimensions, offset: Complex) -> Complex {
     let [r, i] = usizex2::from_array([i % dim.width, i / dim.height])
         .cast::<isize>()
         .sub(isizex2::splat(isize::try_from(dim.height / 2).unwrap()))
@@ -33,11 +28,17 @@ fn index_to_complex(i: usize, scale: f64, dim: WindowDimensions) -> Complex {
         .mul(f64x2::splat(scale))
         .to_array();
 
-    Complex { r, i } + OFFSET
+    Complex { r, i } + offset
 }
 
 #[inline]
-fn generate_buffer(threads: usize, scale: f64, buffer: &mut [u32], dim: WindowDimensions) {
+fn generate_buffer(
+    threads: usize,
+    scale: f64,
+    buffer: &mut [u32],
+    dim: WindowDimensions,
+    offset: Complex,
+) {
     let max_pixel = dim.width * dim.height - 1;
 
     let buf = UncheckedSyncArray::from_slice(buffer);
@@ -50,7 +51,7 @@ fn generate_buffer(threads: usize, scale: f64, buffer: &mut [u32], dim: WindowDi
 
                 while pixel <= max_pixel {
                     let mut z = Complex::default();
-                    let c = index_to_complex(pixel, scale, dim);
+                    let c = index_to_complex(pixel, scale, dim, offset);
 
                     let mut iter: u16 = 0;
 
@@ -78,6 +79,18 @@ fn generate_buffer(threads: usize, scale: f64, buffer: &mut [u32], dim: WindowDi
     });
 }
 
+#[allow(dead_code)] // not currently called
+fn generate_frame(config: &Config, frame: u64, buffer: &mut [u32]) {
+    let mut scale = config.starting_scale;
+
+    #[allow(clippy::cast_precision_loss)] // this is fine, we hit fp error way before frames cap out
+    {
+        scale *= config.scaling_factor.powf(frame as f64);
+    }
+
+    generate_buffer(config.threads, scale, buffer, config.dims, config.offset);
+}
+
 fn insert_frame_counter(frame: u64, buf: &mut [u32], dim: WindowDimensions) {
     let digits = pixel::Digit::from_u64(frame);
 
@@ -93,34 +106,56 @@ fn insert_frame_counter(frame: u64, buf: &mut [u32], dim: WindowDimensions) {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let threads: usize = thread::available_parallelism()?.into();
-    let mut scale: f64 = 4.0 / 450.0;
-    let dimensions = WindowDimensions::default();
+    let conf = Config::generate()?;
 
-    let mut buffer: Vec<u32> = vec![0; dimensions.flat_length()];
+    let mut buffer: Vec<u32> = vec![0; conf.dims.flat_length()];
 
     let mut window = Window::new(
         "Mandelbrot",
-        dimensions.width,
-        dimensions.height,
+        conf.dims.width,
+        conf.dims.height,
         WindowOptions::default(),
     )?;
 
     window.limit_update_rate(Some(std::time::Duration::from_millis(33)));
 
     let mut frame = 0;
+    let mut scale = conf.starting_scale;
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        generate_buffer(threads, scale, &mut buffer, dimensions);
-        insert_frame_counter(frame, &mut buffer, dimensions);
+        generate_buffer(conf.threads, scale, &mut buffer, conf.dims, conf.offset);
+        insert_frame_counter(frame, &mut buffer, conf.dims);
 
-        scale *= 0.95;
+        scale *= conf.scaling_factor;
         frame += 1;
 
-        window.update_with_buffer(&buffer, dimensions.width, dimensions.height)?;
+        window.update_with_buffer(&buffer, conf.dims.width, conf.dims.height)?;
     }
 
     Ok(())
+}
+
+struct Config {
+    dims: WindowDimensions,
+    starting_scale: f64,
+    scaling_factor: f64,
+    offset: Complex,
+    threads: usize,
+}
+
+impl Config {
+    fn generate() -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
+            threads: thread::available_parallelism()?.into(),
+            dims: WindowDimensions::default(),
+            starting_scale: 4.0 / 450.0,
+            scaling_factor: 0.95,
+            offset: Complex {
+                r: -1.781_050_04,
+                i: 0.0,
+            },
+        })
+    }
 }
 
 #[derive(Copy, Clone)]
