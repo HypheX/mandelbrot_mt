@@ -11,14 +11,6 @@ opt-level = 1
 [profile.release]
 lto = "thin"
 
-[dev-dependencies]
-criterion = "0.5.1"
-
-[[bench]]
-name = "draw_buffer"
-harness = false
-
-
 [dependencies]
 minifb = "0.23.0"
 rayon = "1.7.0"
