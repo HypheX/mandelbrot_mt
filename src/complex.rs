@@ -11,7 +11,6 @@ pub struct Complex {
 }
 
 impl Complex {
-    #[inline(always)]
     pub fn magnitude(&self) -> f64 {
         self.r.hypot(self.i)
     }
@@ -20,7 +19,6 @@ impl Complex {
 impl Add for Complex {
     type Output = Self;
 
-    #[inline(always)]
     fn add(self, other: Self) -> Self {
         let [r, i] = f64x2::from_array([self.r, self.i])
             .add(f64x2::from_array([other.r, other.i]))
@@ -33,7 +31,6 @@ impl Add for Complex {
 impl Mul for Complex {
     type Output = Self;
 
-    #[inline(always)]
     fn mul(self, other: Self) -> Self {
         let [r, i] = f64x2::splat(self.r)
             .mul(f64x2::from_array([other.r, other.i]))

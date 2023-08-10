@@ -4,16 +4,15 @@ use std::{
     simd::SimdFloat,
 };
 
-#[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy)]
-pub struct RGB {
+pub struct Rgb {
     r: u8,
     g: u8,
     b: u8,
 }
 
-impl RGB {
-    #[inline(always)]
+impl Rgb {
+    
     fn from_normalized_floats((r, g, b): (f32, f32, f32)) -> Self {
         let [r, g, b, _] = f32x4::from_array([r, g, b, 0.0])
             .mul(f32x4::splat(255.0))
@@ -23,15 +22,23 @@ impl RGB {
         Self { r, g, b }
     }
 
+    
+    #[allow(clippy::many_single_char_names)]
     pub fn from_hsv(h: f32, s: f32, v: f32) -> Self {
         let rgb: (f32, f32, f32) = if s == 0.0 {
             (v, v, v)
         } else {
             let mut h = h * 6.0;
+
+            // this code is witchcraft just let it be
+            #[allow(clippy::float_cmp)]
             if h == 6.0 {
                 h = 0.0;
             }
+
+            #[allow(clippy::cast_possible_truncation)]
             let i = h as i32;
+            #[allow(clippy::cast_precision_loss)]
             let f = h - i as f32;
             let [p, q, t, _] = *f32x4::splat(v)
                 .sub(f32x4::splat(s).mul(f32x4::from_array([1.0, f, (1.0 - f), 0.0])))
@@ -51,7 +58,6 @@ impl RGB {
         Self::from_normalized_floats(rgb)
     }
 
-    #[inline(always)]
     pub fn to_u32(self) -> u32 {
         u32::from_be_bytes([0, self.r, self.g, self.b])
     }

@@ -1,4 +1,5 @@
 #![feature(portable_simd)]
+#![warn(clippy::pedantic)]
 
 use minifb::{Key, Window, WindowOptions};
 use std::{
@@ -13,21 +14,21 @@ mod pixel;
 mod unchecked_array;
 
 use complex::Complex;
-use pixel::RGB;
+use pixel::Rgb;
 use unchecked_array::UncheckedSyncArray;
 
-const ITER_MAX: i32 = 600;
+const ITER_MAX: u16 = 600;
 
 #[inline]
 fn index_to_complex(i: usize, scale: f64, dim: WindowDimensions) -> Complex {
     const OFFSET: Complex = Complex {
-        r: -1.78105004,
+        r: -1.781_050_04,
         i: 0.0,
     };
 
     let [r, i] = usizex2::from_array([i % dim.width, i / dim.height])
         .cast::<isize>()
-        .sub(isizex2::splat((dim.height / 2) as isize))
+        .sub(isizex2::splat(isize::try_from(dim.height / 2).unwrap()))
         .cast::<f64>()
         .mul(f64x2::splat(scale))
         .to_array();
@@ -50,15 +51,20 @@ fn generate_buffer(threads: usize, scale: f64, buffer: &mut [u32], dim: WindowDi
                 while pixel <= max_pixel {
                     let mut z = Complex::default();
                     let c = index_to_complex(pixel, scale, dim);
-                    let mut iter: i32 = 0;
 
-                    while z.magnitude() <= 2.0 && iter < ITER_MAX {
-                        iter += 1;
+                    let mut iter: u16 = 0;
+
+                    for i in 0..ITER_MAX {
+                        if z.magnitude() > 2. {
+                            iter = i;
+                            break;
+                        }
+
                         z = (z * z) + c;
                     }
 
-                    let hsv = (z.magnitude() >= 2.0) as u32
-                        * RGB::from_hsv(((iter as f32) / 70.0) % 1.0, 0.5, 1.0).to_u32();
+                    let hsv = u32::from(z.magnitude() >= 2.0)
+                        * Rgb::from_hsv((f32::from(iter) / 70.0) % 1.0, 0.5, 1.0).to_u32();
 
                     // SAFETY: the pixels given to each thread are unique, and cannot overlap,
                     // pixels are also impossible to be OOB as there are less pixels than the
@@ -119,7 +125,6 @@ impl Default for WindowDimensions {
 }
 
 impl WindowDimensions {
-    #[inline(always)]
     fn flat_length(&self) -> usize {
         self.width * self.height
     }
