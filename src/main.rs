@@ -78,6 +78,20 @@ fn generate_buffer(threads: usize, scale: f64, buffer: &mut [u32], dim: WindowDi
     });
 }
 
+fn insert_frame_counter(frame: u64, buf: &mut [u32], dim: WindowDimensions) {
+    let digits = pixel::Digit::from_u64(frame);
+
+    let mut offset = 1;
+    // cut off top
+    let buf = &mut buf[dim.width..];
+
+    for d in digits {
+        d.render_6_10(buf, dim, offset);
+
+        offset += 8;
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let threads: usize = thread::available_parallelism()?.into();
     let mut scale: f64 = 4.0 / 450.0;
@@ -94,10 +108,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     window.limit_update_rate(Some(std::time::Duration::from_millis(33)));
 
+    let mut frame = 0;
+
     while window.is_open() && !window.is_key_down(Key::Escape) {
         generate_buffer(threads, scale, &mut buffer, dimensions);
+        insert_frame_counter(frame, &mut buffer, dimensions);
 
         scale *= 0.95;
+        frame += 1;
 
         window.update_with_buffer(&buffer, dimensions.width, dimensions.height)?;
     }
@@ -106,7 +124,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 #[derive(Copy, Clone)]
-struct WindowDimensions {
+pub struct WindowDimensions {
     width: usize,
     height: usize,
 }
