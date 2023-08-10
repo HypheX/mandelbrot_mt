@@ -10,12 +10,9 @@ impl<'a, T> UncheckedSyncArray<'a, T> {
     /// # Safety:
     /// As this has no mechanism to ensure more than 1 thread accesses the same index at a time,
     /// if more than 1 thread accesses the same index at a time UB will occur.
-    /// However, this does check for out of bounds accesses
+    /// It will also not check if the given index `idx` is in the bounds of the array.
+    /// Trying to store something in an index that is out of bounds is instantly UB.
     pub unsafe fn store_unchecked(&self, idx: usize, item: T) {
-        if idx >= self.1 {
-            panic!("index out of bounds")
-        }
-
         // SAFETY: no other threads are accessing this index, so we can safely write to it
         // we drop the T given to us by replace, this lets us hack dropping the old T
         unsafe { core::ptr::replace(self.0.add(idx), item) };
