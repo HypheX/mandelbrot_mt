@@ -29,26 +29,20 @@ impl Complex {
 impl Add for Complex {
     type Output = Self;
     fn add(self, other: Self) -> Self {
-        let real: f64 = self.r + other.r;
-        let imaginary: f64 = self.i + other.i;
+        let r = self.r + other.r;
+        let i = self.i + other.i;
 
-        Self {
-            r: real,
-            i: imaginary,
-        }
+        Self { r, i }
     }
 }
 
 impl Mul for Complex {
     type Output = Self;
     fn mul(self, other: Self) -> Self {
-        let real: f64 = (self.r * other.r) - (self.i * other.i);
-        let imaginary: f64 = (self.r * other.i) + (self.i * other.r);
+        let r = (self.r * other.r) - (self.i * other.i);
+        let i = (self.r * other.i) + (self.i * other.r);
 
-        Self {
-            r: real,
-            i: imaginary,
-        }
+        Self { r, i }
     }
 }
 
@@ -85,35 +79,112 @@ impl RGB {
             b: (b * 255.) as u8,
         }
     }
+
+    fn from_hsv(h: f32, s: f32, v: f32) -> Self {
+        let rgb: (f32, f32, f32) = if s == 0.0 {
+            (v, v, v)
+        } else {
+            let mut h = h * 6.0;
+            if h == 6.0 {
+                h = 0.0;
+            }
+            let i = h as i32;
+            let f = h - i as f32;
+            let p = v * (1.0 - s);
+            let q = v * (1.0 - s * f);
+            let t = v * (1.0 - s * (1.0 - f));
+
+            match i {
+                0 => (v, t, p),
+                1 => (q, v, p),
+                2 => (p, v, t),
+                3 => (p, q, v),
+                4 => (t, p, v),
+                5 => (v, p, q),
+                _ => (0., 0., 0.),
+            }
+        };
+
+        Self::from_normalized_floats(rgb)
+    }
+
+    fn to_u32(&self) -> u32 {
+        u32::from_be_bytes([0, self.r, self.g, self.b])
+    }
 }
 
-fn hsv_to_rgb(h: f32, s: f32, v: f32) -> RGB {
-    let rgb: (f32, f32, f32) = if s == 0.0 {
-        (v, v, v)
-    } else {
-        let mut h = h * 6.0;
-        if h == 6.0 {
-            h = 0.0;
-        }
-        let i = h as i32;
-        let f = h - i as f32;
-        let p = v * (1.0 - s);
-        let q = v * (1.0 - s * f);
-        let t = v * (1.0 - s * (1.0 - f));
+struct UncheckedSyncArray<'a, T>(*mut T, usize, core::marker::PhantomData<&'a mut T>);
 
-        match i {
-            0 => (v, t, p),
-            1 => (q, v, p),
-            2 => (p, v, t),
-            3 => (p, q, v),
-            4 => (t, p, v),
-            5 => (v, p, q),
-            _ => (0., 0., 0.),
-        }
-    };
+unsafe impl<'a, T: Send + Sync> Sync for UncheckedSyncArray<'a, T> {}
 
-    RGB::from_normalized_floats(rgb)
+impl<'a, T> UncheckedSyncArray<'a, T> {
+    fn from_slice(v: &'a mut [T]) -> Self {
+        UncheckedSyncArray(v.as_mut_ptr(), v.len(), core::marker::PhantomData)
+    }
+
+    /// # Safety:
+    /// As this has no mechanism to ensure more than 1 thread accesses the same index at a time,
+    /// if more than 1 thread accesses the same index at a time UB will occur.
+    /// However, this does check for out of bounds accesses
+    unsafe fn store_unchecked(&self, idx: usize, item: T) {
+        if idx >= self.1 {
+            panic!("index out of bounds")
+        }
+
+        // SAFETY: no other threads are accessing this index, so we can safely write to it
+        // we drop the T given to us by replace, this lets us hack dropping the old T
+        unsafe { core::ptr::replace(self.0.add(idx), item) };
+    }
 }
+
+fn generate_buffer(threads: usize, scale: f64, buffer: &mut [u32]) {
+    let max_pixel = WIDTH * HEIGHT - 1;
+
+    let buf = UncheckedSyncArray::from_slice(buffer);
+    let out_buf = &buf;
+
+    rayon::scope(|s| {
+        for thread_id in 0..threads {
+            s.spawn(move |_| {
+                let mut pixel = thread_id as usize;
+
+                while pixel <= max_pixel {
+                    let mut z = Complex { r: 0.0, i: 0.0 };
+                    let c = index_to_complex(pixel, scale);
+                    let mut iter: i32 = 0;
+
+                    while z.magnitude() <= 2.0 && iter < ITER_MAX {
+                        iter += 1;
+                        z = (z * z) + c;
+                    }
+
+                    let hsv = if z.magnitude() < 2.0 {
+                        0
+                    } else {
+                        let color = RGB::from_hsv(((iter as f32) / 70.0) % 1.0, 0.5, 1.0);
+
+                        color.to_u32()
+                    };
+
+                    // SAFETY: the pixels given to each thread are unique, and cannot overlap
+                    unsafe { out_buf.store_unchecked(pixel, hsv) };
+
+                    pixel += threads;
+                }
+            });
+        }
+    });
+}
+
+#[test]
+fn ensure_threadsafe() {
+    let threads: usize = thread::available_parallelism().unwrap().into();
+    let mut scale: f64 = 4.0 / 450.0;
+    let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
+
+    generate_buffer(threads, scale, &mut buffer);
+}
+
 
 fn main() {
     let threads: usize = thread::available_parallelism().unwrap().into();
@@ -127,55 +198,12 @@ fn main() {
 
     window.limit_update_rate(Some(std::time::Duration::from_millis(33)));
 
-    let max_pixel = WIDTH * HEIGHT - 1;
-
-    let mut deltas: Vec<Vec<(usize, u32)>> = vec![Vec::new(); threads];
-
     while window.is_open() && !window.is_key_down(Key::Escape) {
-
-        let start = std::time::Instant::now();
-
-        rayon::scope(|s| {
-            for (thread_id, delta) in deltas.iter_mut().enumerate() {
-                s.spawn(move |_| {
-                    let mut pixel = thread_id as usize;
-
-                    delta.clear();
-
-                    while pixel <= max_pixel {
-                        let mut z = Complex { r: 0.0, i: 0.0 };
-                        let c = index_to_complex(pixel, scale);
-                        let mut iter: i32 = 0;
-
-                        while z.magnitude() <= 2.0 && iter < ITER_MAX {
-                            iter += 1;
-                            z = (z * z) + c;
-                        }
-
-                        if z.magnitude() < 2.0 {
-                            delta.push((pixel, 0));
-                        } else {
-                            let color: RGB = hsv_to_rgb(((iter as f32) / 70.0) % 1.0, 0.5, 1.0);
-
-                            delta.push((pixel, u32::from_be_bytes([0, color.r, color.g, color.b])));
-                        }
-                        pixel += threads;
-                    }
-                });
-            }
-        });
-
-        for handle in &deltas {
-            for &(index, color) in handle {
-                buffer[index] = color;
-            }
-        }
+        generate_buffer(threads, scale, &mut buffer);
 
         scale = scale * 0.95;
 
         // We unwrap here as we want this code to exit if it fails. Real applications may want to handle this in a different way
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
-
-        println!("{:?}", start.elapsed());
     }
 }
