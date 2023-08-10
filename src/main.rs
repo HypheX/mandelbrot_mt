@@ -4,7 +4,7 @@ use minifb::{Key, Window, WindowOptions};
 use std::{
     error::Error,
     ops::{Mul, Sub},
-    simd::{f64x2, isizex2, usizex2},
+    simd::{f64x2, isizex2, usizex2, SimdInt, SimdUint},
     thread,
 };
 

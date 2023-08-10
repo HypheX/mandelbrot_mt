@@ -1,6 +1,7 @@
 use std::{
     ops::{Mul, Sub},
     simd::f32x4,
+    simd::SimdFloat,
 };
 
 #[allow(clippy::upper_case_acronyms)]
