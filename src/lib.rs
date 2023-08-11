@@ -31,29 +31,33 @@ pub fn index_to_complex(i: usize, scale: f64, dim: WindowDimensions, offset: Com
 
 #[inline]
 pub fn generate_buffer(scale: f64, buffer: &mut [u32], dim: WindowDimensions, offset: Complex) {
-    for (h_axis, pixels) in buffer.chunks_mut(dim.width).enumerate() {
-        for (idx, pix) in pixels.iter_mut().enumerate() {
-            let mut z = Complex::default();
-            let c = index_to_complex(idx + (h_axis * dim.width), scale, dim, offset);
+    rayon::scope(|s| {
+        for (h_axis, pixels) in buffer.chunks_mut(dim.width).enumerate() {
+            s.spawn(move |_| {
+                for (idx, pix) in pixels.iter_mut().enumerate() {
+                    let mut z = Complex::default();
+                    let c = index_to_complex(idx + (h_axis * dim.width), scale, dim, offset);
 
-            let mut iter = None;
+                    let mut iter = None;
 
-            for i in 0..ITER_MAX {
-                if z.mandelbrot_escaped() {
-                    iter = Some(i);
-                    break;
+                    for i in 0..ITER_MAX {
+                        if z.mandelbrot_escaped() {
+                            iter = Some(i);
+                            break;
+                        }
+
+                        z.mandelbrot_iter(c);
+                    }
+
+                    let rgb = iter.map_or(0, |rgb| {
+                        Rgb::from_hsv((f32::from(rgb) / 70.0) % 1.0, 0.5, 1.0).to_u32()
+                    });
+
+                    *pix = rgb;
                 }
-
-                z.mandelbrot_iter(c);
-            }
-
-            let rgb = iter.map_or(0, |rgb| {
-                Rgb::from_hsv((f32::from(rgb) / 70.0) % 1.0, 0.5, 1.0).to_u32()
             });
-
-            *pix = rgb;
         }
-    }
+    });
 }
 
 #[allow(dead_code)] // not currently called
