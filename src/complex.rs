@@ -1,7 +1,6 @@
 use std::{
     fmt,
     ops::{Add, Mul},
-    simd::f64x2,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -31,9 +30,8 @@ impl Add for Complex {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
-        let [r, i] = f64x2::from_array([self.r, self.i])
-            .add(f64x2::from_array([other.r, other.i]))
-            .to_array();
+        let r = self.r + other.r;
+        let i = self.i + other.i;
 
         Self { r, i }
     }
@@ -49,10 +47,8 @@ impl Mul for Complex {
     type Output = Self;
 
     fn mul(self, other: Self) -> Self {
-        let [r, i] = f64x2::splat(self.r)
-            .mul(f64x2::from_array([other.r, other.i]))
-            .add(f64x2::splat(self.i).mul(f64x2::from_array([-other.i, other.r])))
-            .to_array();
+        let r = self.r * other.r + (self.i * -other.i);
+        let i = self.r * other.i + (self.i * other.r);
 
         Self { r, i }
     }

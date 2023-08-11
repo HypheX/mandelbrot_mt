@@ -1,8 +1,3 @@
-use std::{
-    ops::{Mul, Sub},
-    simd::f32x4,
-    simd::SimdFloat,
-};
 
 #[derive(Clone, Copy)]
 pub struct Rgb {
@@ -13,10 +8,8 @@ pub struct Rgb {
 
 impl Rgb {
     fn from_normalized_floats((r, g, b): (f32, f32, f32)) -> Self {
-        let [r, g, b, _] = f32x4::from_array([r, g, b, 0.0])
-            .mul(f32x4::splat(255.0))
-            .cast::<u8>()
-            .to_array();
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        let [r, g, b] = [r, g, b].map(|x| (x * 255.) as u8);
 
         Self { r, g, b }
     }
@@ -38,9 +31,10 @@ impl Rgb {
             let i = h as i32;
             #[allow(clippy::cast_precision_loss)]
             let f = h - i as f32;
-            let [p, q, t, _] = *f32x4::splat(v)
-                .sub(f32x4::splat(s).mul(f32x4::from_array([1.0, f, (1.0 - f), 0.0])))
-                .as_array();
+
+            let p = v - (s * 1.);
+            let q = v - (s * f);
+            let t = v - (s * (1. - f));
 
             match i {
                 0 => (v, t, p),

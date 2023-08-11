@@ -1,12 +1,6 @@
-#![feature(portable_simd)]
 #![warn(clippy::pedantic)]
 
 pub mod complex;
-
-use std::{
-    ops::{Mul, Sub},
-    simd::{f64x2, isizex2, usizex2, SimdInt, SimdUint},
-};
 
 mod pixel;
 
@@ -16,15 +10,13 @@ use pixel::Rgb;
 const ITER_MAX: u16 = 600;
 
 #[inline]
-#[allow(clippy::missing_panics_doc)]
+#[allow(clippy::missing_panics_doc, clippy::cast_precision_loss)]
 #[must_use]
 pub fn index_to_complex(i: usize, scale: f64, dim: WindowDimensions, offset: Complex) -> Complex {
-    let [r, i] = usizex2::from_array([i % dim.width, i / dim.height])
-        .cast::<isize>()
-        .sub(isizex2::splat(isize::try_from(dim.height / 2).unwrap()))
-        .cast::<f64>()
-        .mul(f64x2::splat(scale))
-        .to_array();
+    let hd2 = isize::try_from(dim.height / 2).unwrap();
+
+    let r = (isize::try_from(i % dim.width).unwrap() - hd2) as f64 * scale;
+    let i = (isize::try_from(i / dim.height).unwrap() - hd2) as f64 * scale;
 
     Complex { r, i } + offset
 }

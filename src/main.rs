@@ -1,5 +1,4 @@
 #![warn(clippy::pedantic)]
-#![feature(portable_simd)]
 
 use crossbeam_channel::{unbounded as channel, Receiver, Sender, TryRecvError};
 
