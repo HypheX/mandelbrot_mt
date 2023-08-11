@@ -6,16 +6,13 @@ use std::{
     error::Error,
     ops::{Mul, Sub},
     simd::{f64x2, isizex2, usizex2, SimdInt, SimdUint},
-    thread,
 };
 
 mod complex;
 mod pixel;
-mod unchecked_array;
 
 use complex::Complex;
 use pixel::Rgb;
-use unchecked_array::UncheckedSyncArray;
 
 const ITER_MAX: u16 = 600;
 
@@ -31,51 +28,14 @@ fn index_to_complex(i: usize, scale: f64, dim: WindowDimensions, offset: Complex
     Complex { r, i } + offset
 }
 
-struct PixelIter {
-    threads: usize,
-    current: usize,
-    max: usize,
-}
-
-impl Iterator for PixelIter {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<usize> {
-        if self.current >= self.max {
-            return None;
-        }
-
-        let cur = self.current;
-
-        self.current += self.threads;
-
-        Some(cur)
-    }
-}
-
 #[inline]
-fn generate_buffer(
-    threads: usize,
-    scale: f64,
-    buffer: &mut [u32],
-    dim: WindowDimensions,
-    offset: Complex,
-) {
-    let buf = UncheckedSyncArray::from_slice(buffer);
-    let out_buf = &buf;
-
+fn generate_buffer(scale: f64, buffer: &mut [u32], dim: WindowDimensions, offset: Complex) {
     rayon::scope(|s| {
-        for thread_id in 0..threads {
+        for (h_axis, pixels) in buffer.chunks_mut(dim.width).enumerate() {
             s.spawn(move |_| {
-                let pixiter = PixelIter {
-                    threads,
-                    current: thread_id,
-                    max: out_buf.len(),
-                };
-
-                for pix in pixiter {
+                for (idx, pix) in pixels.iter_mut().enumerate() {
                     let mut z = Complex::default();
-                    let c = index_to_complex(pix, scale, dim, offset);
+                    let c = index_to_complex(idx + (h_axis * dim.width), scale, dim, offset);
 
                     let mut iter = None;
 
@@ -92,10 +52,7 @@ fn generate_buffer(
                         Rgb::from_hsv((f32::from(rgb) / 70.0) % 1.0, 0.5, 1.0).to_u32()
                     });
 
-                    // SAFETY: the pixels given to each thread are unique, and cannot overlap,
-                    // pixels are also impossible to be OOB as there are less pixels than the
-                    // allocated capacity of the array.
-                    unsafe { out_buf.store_unchecked(pix, rgb) };
+                    *pix = rgb;
                 }
             });
         }
@@ -111,7 +68,7 @@ fn generate_frame(config: &Config, frame: u64, buffer: &mut [u32]) {
         scale *= config.scaling_factor.powf(frame as f64);
     }
 
-    generate_buffer(config.threads, scale, buffer, config.dims, config.offset);
+    generate_buffer(scale, buffer, config.dims, config.offset);
 }
 
 fn insert_frame_counter(frame: u64, buf: &mut [u32], dim: WindowDimensions) {
@@ -148,7 +105,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let start = std::time::Instant::now();
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        generate_buffer(conf.threads, scale, &mut buffer, conf.dims, conf.offset);
+        generate_buffer(scale, &mut buffer, conf.dims, conf.offset);
         insert_frame_counter(frame, &mut buffer, conf.dims);
 
         scale *= conf.scaling_factor;
@@ -169,13 +126,11 @@ struct Config {
     starting_scale: f64,
     scaling_factor: f64,
     offset: Complex,
-    threads: usize,
 }
 
 impl Config {
     fn generate() -> Result<Self, Box<dyn Error>> {
         Ok(Self {
-            threads: thread::available_parallelism()?.into(),
             dims: WindowDimensions::default(),
             starting_scale: 4.0 / 450.0,
             scaling_factor: 0.95,
