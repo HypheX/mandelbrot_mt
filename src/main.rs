@@ -9,7 +9,6 @@ use std::error::Error;
 
 struct TwoWayPressureValve {
     spawned: usize,
-    pressure: i64,
     recv_ch: Receiver<Vec<u32>>,
     dims: WindowDimensions,
 }
@@ -20,20 +19,16 @@ impl Iterator for TwoWayPressureValve {
     /// dynamically allocates or frees vecs in the pipe depending on pressure
     fn next(&mut self) -> Option<Vec<u32>> {
         match self.recv_ch.try_recv() {
-            Ok(buf) => {
-                self.pressure = -i64::try_from(self.recv_ch.len()).unwrap();
-
-                Some(if self.pressure < -2 {
-                    drop(buf);
-                    self.spawned -= 1;
-                    let Ok(buf) = self.recv_ch.recv() else {
-                        return None;
-                    };
-                    buf
-                } else {
-                    buf
-                })
-            }
+            Ok(buf) => Some(if self.recv_ch.len() > 2 {
+                drop(buf);
+                self.spawned -= 1;
+                let Ok(buf) = self.recv_ch.recv() else {
+                    return None;
+                };
+                buf
+            } else {
+                buf
+            }),
             Err(TryRecvError::Disconnected) => None,
             Err(TryRecvError::Empty) => Some(if self.spawned < 100 {
                 self.spawned += 1;
@@ -52,18 +47,11 @@ fn mandelbrot_generator(conf: Config) -> (Sender<Vec<u32>>, Receiver<Vec<u32>>) 
     let (return_send_ch, recv_ch) = channel();
     let (send_ch, return_recv_ch) = channel();
 
-    //for _ in 0..5 {
-    //    return_send_ch
-    //        .send(vec![0; conf.dims.flat_length()])
-    //        .unwrap();
-    //}
-
     std::thread::spawn(move || {
         let mut scale = conf.starting_scale;
 
         let iter = TwoWayPressureValve {
             spawned: 0,
-            pressure: 0,
             recv_ch,
             dims: conf.dims,
         };
