@@ -14,6 +14,15 @@ impl Complex {
     pub fn magnitude(&self) -> f64 {
         self.r.hypot(self.i)
     }
+
+    pub fn mandelbrot_iter(&mut self, c: Complex) {
+        *self *= *self;
+        *self += c;
+    }
+
+    pub fn mandelbrot_escaped(&self) -> bool {
+        self.magnitude() > 2.
+    }
 }
 
 impl Add for Complex {
@@ -28,6 +37,12 @@ impl Add for Complex {
     }
 }
 
+impl core::ops::AddAssign for Complex {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
+
 impl Mul for Complex {
     type Output = Self;
 
@@ -38,6 +53,12 @@ impl Mul for Complex {
             .to_array();
 
         Self { r, i }
+    }
+}
+
+impl core::ops::MulAssign for Complex {
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = *self * rhs;
     }
 }
 

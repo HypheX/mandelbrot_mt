@@ -31,6 +31,28 @@ fn index_to_complex(i: usize, scale: f64, dim: WindowDimensions, offset: Complex
     Complex { r, i } + offset
 }
 
+struct PixelIter {
+    threads: usize,
+    current: usize,
+    max: usize,
+}
+
+impl Iterator for PixelIter {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        if self.current >= self.max {
+            return None;
+        }
+
+        let cur = self.current;
+
+        self.current += self.threads;
+
+        Some(cur)
+    }
+}
+
 #[inline]
 fn generate_buffer(
     threads: usize,
@@ -45,32 +67,35 @@ fn generate_buffer(
     rayon::scope(|s| {
         for thread_id in 0..threads {
             s.spawn(move |_| {
-                let mut pixel = thread_id;
+                let pixiter = PixelIter {
+                    threads,
+                    current: thread_id,
+                    max: out_buf.len(),
+                };
 
-                while pixel < out_buf.len() {
+                for pix in pixiter {
                     let mut z = Complex::default();
-                    let c = index_to_complex(pixel, scale, dim, offset);
+                    let c = index_to_complex(pix, scale, dim, offset);
 
-                    let mut iter: u16 = 0;
+                    let mut iter = None;
 
                     for i in 0..ITER_MAX {
-                        if z.magnitude() > 2. {
-                            iter = i;
+                        if z.mandelbrot_escaped() {
+                            iter = Some(i);
                             break;
                         }
 
-                        z = (z * z) + c;
+                        z.mandelbrot_iter(c);
                     }
 
-                    let hsv = u32::from(z.magnitude() >= 2.0)
-                        * Rgb::from_hsv((f32::from(iter) / 70.0) % 1.0, 0.5, 1.0).to_u32();
+                    let rgb = iter.map_or(0, |rgb| {
+                        Rgb::from_hsv((f32::from(rgb) / 70.0) % 1.0, 0.5, 1.0).to_u32()
+                    });
 
                     // SAFETY: the pixels given to each thread are unique, and cannot overlap,
                     // pixels are also impossible to be OOB as there are less pixels than the
                     // allocated capacity of the array.
-                    unsafe { out_buf.store_unchecked(pixel, hsv) };
-
-                    pixel += threads;
+                    unsafe { out_buf.store_unchecked(pix, rgb) };
                 }
             });
         }
