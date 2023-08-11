@@ -85,13 +85,13 @@ fn insert_frame_counter(frame: u64, buf: &mut [u32], dim: WindowDimensions) {
     }
 }
 
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 
-fn mandelbrot_generator(conf: Config) -> (SyncSender<Vec<u32>>, Receiver<Vec<u32>>) {
-    let (return_send_ch, recv_ch) = sync_channel(20);
-    let (send_ch, return_recv_ch) = sync_channel(20);
+fn mandelbrot_generator(conf: Config) -> (Sender<Vec<u32>>, Receiver<Vec<u32>>) {
+    let (return_send_ch, recv_ch) = channel();
+    let (send_ch, return_recv_ch) = channel();
 
-    for _ in 0..10 {
+    for _ in 0..5 {
         return_send_ch
             .send(vec![0; conf.dims.flat_length()])
             .unwrap();
@@ -99,7 +99,21 @@ fn mandelbrot_generator(conf: Config) -> (SyncSender<Vec<u32>>, Receiver<Vec<u32
 
     std::thread::spawn(move || {
         let mut scale = conf.starting_scale;
-        for mut buf in recv_ch {
+        let mut spawned = 5;
+        loop {
+            let mut buf = match recv_ch.try_recv() {
+                Ok(buf) => buf,
+                Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty) => {
+                    if spawned < 100 {
+                        spawned += 1;
+                        vec![0; conf.dims.flat_length()]
+                    } else {
+                        let Ok(buf) = recv_ch.recv() else { break };
+                        buf
+                    }
+                }
+            };
 
             generate_buffer(scale, &mut buf, conf.dims, conf.offset);
 
