@@ -1,8 +1,9 @@
+#![warn(clippy::pedantic)]
 #![feature(portable_simd)]
 
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 
-use mandelbrot_mt_f64::*;
+use mandelbrot_mt_f64::{generate_buffer, insert_frame_counter, Config};
 use minifb::{Key, Window, WindowOptions};
 use std::error::Error;
 

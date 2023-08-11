@@ -16,6 +16,8 @@ use pixel::Rgb;
 const ITER_MAX: u16 = 600;
 
 #[inline]
+#[allow(clippy::missing_panics_doc)]
+#[must_use]
 pub fn index_to_complex(i: usize, scale: f64, dim: WindowDimensions, offset: Complex) -> Complex {
     let [r, i] = usizex2::from_array([i % dim.width, i / dim.height])
         .cast::<isize>()
@@ -89,6 +91,7 @@ pub struct Config {
 }
 
 impl Config {
+    #[must_use]
     pub fn generate() -> Self {
         Self {
             dims: WindowDimensions::default(),
@@ -122,6 +125,7 @@ impl Default for WindowDimensions {
 }
 
 impl WindowDimensions {
+    #[must_use]
     pub fn flat_length(&self) -> usize {
         self.width * self.height
     }

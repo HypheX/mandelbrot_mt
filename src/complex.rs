@@ -11,6 +11,7 @@ pub struct Complex {
 }
 
 impl Complex {
+    #[must_use]
     pub fn magnitude(&self) -> f64 {
         self.r.hypot(self.i)
     }
@@ -20,6 +21,7 @@ impl Complex {
         *self += c;
     }
 
+    #[must_use]
     pub fn mandelbrot_escaped(&self) -> bool {
         self.magnitude() > 2.
     }
