@@ -85,10 +85,35 @@ fn insert_frame_counter(frame: u64, buf: &mut [u32], dim: WindowDimensions) {
     }
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let conf = Config::generate()?;
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
-    let mut buffer: Vec<u32> = vec![0; conf.dims.flat_length()];
+fn mandelbrot_generator(conf: Config) -> (SyncSender<Vec<u32>>, Receiver<Vec<u32>>) {
+    let (return_send_ch, recv_ch) = sync_channel(20);
+    let (send_ch, return_recv_ch) = sync_channel(20);
+
+    for _ in 0..10 {
+        return_send_ch
+            .send(vec![0; conf.dims.flat_length()])
+            .unwrap();
+    }
+
+    std::thread::spawn(move || {
+        let mut scale = conf.starting_scale;
+        for mut buf in recv_ch {
+
+            generate_buffer(scale, &mut buf, conf.dims, conf.offset);
+
+            scale *= conf.scaling_factor;
+
+            send_ch.send(buf).unwrap();
+        }
+    });
+
+    (return_send_ch, return_recv_ch)
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let conf = Config::generate();
 
     let mut window = Window::new(
         "Mandelbrot",
@@ -100,18 +125,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     window.limit_update_rate(Some(std::time::Duration::from_millis(33)));
 
     let mut frame = 0;
-    let mut scale = conf.starting_scale;
+
+    let (send, recv) = mandelbrot_generator(conf);
 
     let start = std::time::Instant::now();
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        generate_buffer(scale, &mut buffer, conf.dims, conf.offset);
+        let mut buffer = recv.recv().unwrap();
+
         insert_frame_counter(frame, &mut buffer, conf.dims);
 
-        scale *= conf.scaling_factor;
         frame += 1;
 
         window.update_with_buffer(&buffer, conf.dims.width, conf.dims.height)?;
+
+        send.send(buffer).unwrap();
 
         if frame % 100 == 0 {
             println!("{frame} frames in {:?}", start.elapsed());
@@ -121,6 +149,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[derive(Copy, Clone)]
 struct Config {
     dims: WindowDimensions,
     starting_scale: f64,
@@ -129,8 +158,8 @@ struct Config {
 }
 
 impl Config {
-    fn generate() -> Result<Self, Box<dyn Error>> {
-        Ok(Self {
+    fn generate() -> Self {
+        Self {
             dims: WindowDimensions::default(),
             starting_scale: 4.0 / 450.0,
             scaling_factor: 0.95,
@@ -138,7 +167,7 @@ impl Config {
                 r: -1.781_050_04,
                 i: 0.0,
             },
-        })
+        }
     }
 }
 
