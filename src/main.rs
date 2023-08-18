@@ -1,22 +1,34 @@
 #![warn(clippy::pedantic)]
 
-use crossbeam_channel::{unbounded as channel, Receiver, Sender, TryRecvError};
+use crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError};
 
-use mandelbrot_mt_f64::{generate_buffer, insert_frame_counter, Config, WindowDimensions};
+use mandelbrot_mt_f64::{generate_buffer, insert_frame_counter, Config};
 use minifb::{Key, Window, WindowOptions};
 use std::error::Error;
 
-struct TwoWayPressureValve {
+struct TwoWayPressureValve<T, C: FnMut() -> T> {
     spawned: usize,
-    recv_ch: Receiver<Vec<u32>>,
-    dims: WindowDimensions,
+    limit: usize,
+    recv_ch: Receiver<T>,
+    creator: C,
 }
 
-impl Iterator for TwoWayPressureValve {
-    type Item = Vec<u32>;
+impl<T, C: FnMut() -> T> TwoWayPressureValve<T, C> {
+    fn new(recv_ch: Receiver<T>, creator: C) -> Self {
+        Self {
+            spawned: 0,
+            limit: 100,
+            recv_ch,
+            creator,
+        }
+    }
+}
+
+impl<T, C: FnMut() -> T> Iterator for TwoWayPressureValve<T, C> {
+    type Item = T;
 
     /// dynamically allocates or frees vecs in the pipe depending on pressure
-    fn next(&mut self) -> Option<Vec<u32>> {
+    fn next(&mut self) -> Option<T> {
         match self.recv_ch.try_recv() {
             Ok(buf) => Some(if self.recv_ch.len() > 2 {
                 drop(buf);
@@ -29,9 +41,9 @@ impl Iterator for TwoWayPressureValve {
                 buf
             }),
             Err(TryRecvError::Disconnected) => None,
-            Err(TryRecvError::Empty) => Some(if self.spawned < 100 {
+            Err(TryRecvError::Empty) => Some(if self.spawned < self.limit {
                 self.spawned += 1;
-                vec![0; self.dims.flat_length()]
+                (self.creator)()
             } else {
                 let Ok(buf) = self.recv_ch.recv() else {
                     return None;
@@ -43,17 +55,13 @@ impl Iterator for TwoWayPressureValve {
 }
 
 fn mandelbrot_generator(conf: Config) -> (Sender<Vec<u32>>, Receiver<Vec<u32>>) {
-    let (return_send_ch, recv_ch) = channel();
-    let (send_ch, return_recv_ch) = channel();
+    let (return_send_ch, recv_ch) = unbounded();
+    let (send_ch, return_recv_ch) = unbounded();
 
     std::thread::spawn(move || {
         let mut scale = conf.starting_scale;
 
-        let iter = TwoWayPressureValve {
-            spawned: 0,
-            recv_ch,
-            dims: conf.dims,
-        };
+        let iter = TwoWayPressureValve::new(recv_ch, || vec![0; conf.dims.flat_length()]);
 
         for mut buf in iter {
             generate_buffer(scale, &mut buf, conf.dims, conf.offset);
