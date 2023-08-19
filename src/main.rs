@@ -8,7 +8,8 @@ use std::error::Error;
 
 struct TwoWayPressureValve<T, C: FnMut() -> T> {
     spawned: usize,
-    limit: usize,
+    spawn_limit: usize,
+    backpressure_limit: usize,
     recv_ch: Receiver<T>,
     creator: C,
 }
@@ -17,7 +18,8 @@ impl<T, C: FnMut() -> T> TwoWayPressureValve<T, C> {
     fn new(recv_ch: Receiver<T>, creator: C) -> Self {
         Self {
             spawned: 0,
-            limit: 100,
+            spawn_limit: 100,
+            backpressure_limit: 2,
             recv_ch,
             creator,
         }
@@ -30,7 +32,7 @@ impl<T, C: FnMut() -> T> Iterator for TwoWayPressureValve<T, C> {
     /// dynamically allocates or frees vecs in the pipe depending on pressure
     fn next(&mut self) -> Option<T> {
         match self.recv_ch.try_recv() {
-            Ok(buf) => Some(if self.recv_ch.len() > 2 {
+            Ok(buf) => Some(if self.recv_ch.len() > self.backpressure_limit {
                 drop(buf);
                 self.spawned -= 1;
                 let Ok(buf) = self.recv_ch.recv() else {
@@ -41,7 +43,7 @@ impl<T, C: FnMut() -> T> Iterator for TwoWayPressureValve<T, C> {
                 buf
             }),
             Err(TryRecvError::Disconnected) => None,
-            Err(TryRecvError::Empty) => Some(if self.spawned < self.limit {
+            Err(TryRecvError::Empty) => Some(if self.spawned < self.spawn_limit {
                 self.spawned += 1;
                 (self.creator)()
             } else {
